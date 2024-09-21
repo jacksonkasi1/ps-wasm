@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ghostscript WebAssembly</title>
+</head>
+<body>
+  <h1>Ghostscript WebAssembly</h1>
+  <div id="output"></div>
+
+  <script>
+    var Module = {
+      onRuntimeInitialized: function() {
+        console.log("Ghostscript WASM initialized");
+        // Insert commands to run Ghostscript on PDFs or PostScript files
+      }
+    };
+
+    var script = document.createElement('script');
+    script.src = './gs.js'; // Path to the compiled WASM JS file
+    document.body.appendChild(script);
+  </script>
+</body>
+</html>

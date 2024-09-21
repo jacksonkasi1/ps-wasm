@@ -17,6 +17,7 @@ PROJECT_ROOT=$(pwd)
 GHOSTSCRIPT_FOLDER="${PROJECT_ROOT}/ghostscript-${GHOSTSCRIPT_VERSION}"
 PATCH_FOLDER="${PROJECT_ROOT}/code_patch"
 OUTPUT_DIR="${PROJECT_ROOT}/bin"
+EMSDK_FOLDER="${PROJECT_ROOT}/emsdk"
 
 # ---------------------------
 # Function Definitions
@@ -55,16 +56,34 @@ fi
 
 echo "Installing Emscripten dependencies..."
 if ! command_exists emcc; then
-    echo "Emscripten not found. Cloning and installing EMSDK..."
-    git clone https://github.com/emscripten-core/emsdk.git
+    if [ ! -d "${EMSDK_FOLDER}" ]; then
+        echo "Emscripten not found. Cloning and installing EMSDK..."
+        git clone https://github.com/emscripten-core/emsdk.git
+    else
+        echo "emsdk directory already exists. Skipping clone."
+    fi
     cd emsdk
+    echo "Installing Emscripten..."
     ./emsdk install latest
+    echo "Activating Emscripten..."
     ./emsdk activate latest
-    source ./emsdk_env.sh
+    echo "Sourcing EMSDK environment..."
+    # Use the absolute path to ensure sourcing works correctly
+    source "${EMSDK_FOLDER}/emsdk_env.sh"
     cd "${PROJECT_ROOT}"
 else
     echo "Emscripten is already installed."
-    source ./emsdk/emsdk_env.sh
+    # If emsdk directory exists, source the environment
+    if [ -d "${EMSDK_FOLDER}" ]; then
+        echo "Sourcing existing EMSDK environment..."
+        source "${EMSDK_FOLDER}/emsdk_env.sh"
+    fi
+fi
+
+# Verify that emcc is now available
+if ! command_exists emcc; then
+    echo "Emscripten installation failed or emcc is not in PATH."
+    exit 1
 fi
 
 # Set up environment variables for Emscripten
@@ -80,9 +99,10 @@ export RANLIB=emranlib
 if [ ! -d "$GHOSTSCRIPT_FOLDER" ]; then
     echo "Downloading Ghostscript version ${GHOSTSCRIPT_VERSION}..."
     wget "${GHOSTSCRIPT_DOWNLOAD_URL}"
+    echo "Extracting Ghostscript..."
     tar -xzf "ghostscript-${GHOSTSCRIPT_VERSION}.tar.gz"
 else
-    echo "Ghostscript source code already exists. Skipping download."
+    echo "Ghostscript source code already exists. Skipping download and extraction."
 fi
 
 # ---------------------------
@@ -107,24 +127,68 @@ else
 fi
 
 # ---------------------------
+# Compile Auxiliary Tools with Host Compiler
+# ---------------------------
+
+echo "Compiling auxiliary tools with host compiler..."
+
+# Detect available host compiler
+if command_exists gcc; then
+    HOST_CC=gcc
+    HOST_CXX=g++
+elif command_exists clang; then
+    HOST_CC=clang
+    HOST_CXX=clang++
+else
+    echo "No suitable host compiler found (gcc or clang). Please install one."
+    exit 1
+fi
+
+echo "Using host compiler: $HOST_CC and $HOST_CXX"
+
+# Temporarily set CC and CXX to host compiler
+export OLD_CC="$CC"
+export OLD_CXX="$CXX"
+export CC="$HOST_CC"
+export CXX="$HOST_CXX"
+
+# Configure Ghostscript for building auxiliary tools
+echo "Configuring Ghostscript with host compiler for auxiliary tools..."
+./configure \
+    --disable-threading \
+    --disable-cups \
+    --disable-dbus \
+    --disable-gtk \
+    --with-drivers=PS \
+    --without-tesseract \
+    --with-arch_h="${TARGET_WASM_H}"
+
+echo "Building auxiliary tools..."
+make obj/aux/genarch
+
+# Restore CC and CXX to Emscripten compilers
+export CC="$OLD_CC"
+export CXX="$OLD_CXX"
+
+echo "Auxiliary tools compiled successfully."
+
+# ---------------------------
 # Configure Ghostscript for WASM
 # ---------------------------
 
-cd "${GHOSTSCRIPT_FOLDER}"
-
 echo "Configuring Ghostscript for WASM..."
-if [ ! -f "Makefile" ]; then
-    emconfigure ./configure \
-        --disable-threading \
-        --disable-cups \
-        --disable-dbus \
-        --disable-gtk \
-        --with-drivers=PS \
-        --with-arch_h="${TARGET_WASM_H}"
-    echo "Configuration completed successfully."
-else
-    echo "Makefile already exists. Skipping configuration."
-fi
+
+# Re-configure with Emscripten compilers
+emconfigure ./configure \
+    --disable-threading \
+    --disable-cups \
+    --disable-dbus \
+    --disable-gtk \
+    --with-drivers=PS \
+    --without-tesseract \
+    --with-arch_h="${TARGET_WASM_H}"
+
+echo "Configuration for WASM completed successfully."
 
 # ---------------------------
 # Compile Ghostscript to WebAssembly
