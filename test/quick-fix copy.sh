@@ -12,14 +12,12 @@ source "${HOME}/emsdk/emsdk_env.sh"
 
 # Ghostscript version
 GHOSTSCRIPT_VERSION="10.04.0"
+# GHOSTSCRIPT_VERSION="9.26"
 
 # Project directories
 PROJECT_ROOT=$(pwd)
 GHOSTSCRIPT_FOLDER="${PROJECT_ROOT}/ghostscript-${GHOSTSCRIPT_VERSION}"
 PATCH_FOLDER="${PROJECT_ROOT}/code_patch"
-
-# Paths to files
-WASM_H="${GHOSTSCRIPT_FOLDER}/arch/wasm.h"
 
 # ---------------------------
 # Function Definitions
@@ -35,49 +33,6 @@ command_exists() {
 # ---------------------------
 
 echo "Starting quick fix for Ghostscript WebAssembly build..."
-
-# ---------------------------
-# Update wasm.h
-# ---------------------------
-
-echo "Updating wasm.h with necessary definitions..."
-
-cat > "${WASM_H}" <<EOL
-/* wasm.h - Architecture-specific definitions for WebAssembly */
-
-/* Sizes of basic data types */
-#define ARCH_SIZEOF_CHAR 1
-#define ARCH_SIZEOF_SHORT 2
-#define ARCH_SIZEOF_INT 4
-#define ARCH_SIZEOF_LONG 4
-#define ARCH_SIZEOF_LONGLONG 8
-#define ARCH_SIZEOF_FLOAT 4
-#define ARCH_SIZEOF_DOUBLE 8
-#define ARCH_SIZEOF_PTR 4
-
-/* Alignment requirements */
-#define ARCH_ALIGN_SHORT_MOD 2
-#define ARCH_ALIGN_INT_MOD 4
-#define ARCH_ALIGN_LONG_MOD 4
-#define ARCH_ALIGN_LONGLONG_MOD 8
-#define ARCH_ALIGN_PTR_MOD 4
-#define ARCH_ALIGN_FLOAT_MOD 4
-#define ARCH_ALIGN_DOUBLE_MOD 8
-
-/* Byte order */
-#define ARCH_IS_BIG_ENDIAN 0
-
-/* Architecture name */
-#define ARCH_ARCH_NAME "wasm32"
-
-/* Other definitions */
-#define ARCH_FLOAT_MANTISSA_BITS 24
-#define ARCH_FLOAT_EXPONENT_BITS 8
-#define ARCH_DOUBLE_MANTISSA_BITS 53
-#define ARCH_DOUBLE_EXPONENT_BITS 11
-EOL
-
-echo "wasm.h updated successfully."
 
 # ---------------------------
 # Compile Auxiliary Tools with Host Compiler
@@ -115,7 +70,7 @@ echo "Configuring Ghostscript with host compiler for auxiliary tools..."
     --disable-gtk \
     --with-drivers=PS \
     --without-tesseract \
-    --with-arch_h="${WASM_H}"
+    --with-arch_h="${GHOSTSCRIPT_FOLDER}/arch/wasm.h"
 
 echo "Building auxiliary tools..."
 make -C base genarch genconf echogs
@@ -128,10 +83,7 @@ chmod +x ./obj/aux/echogs
 
 # Run genarch to generate arch.h
 echo "Generating arch.h using genarch..."
-./obj/aux/genarch ./obj/arch.h "${WASM_H}"
-
-# Touch arch.h to prevent it from being regenerated
-touch ./obj/arch.h
+./obj/aux/genarch ./obj/arch.h ./arch/wasm.h
 
 # Restore CC and CXX to Emscripten compilers
 export CC="emcc"
@@ -166,7 +118,7 @@ emconfigure ./configure \
     --disable-gtk \
     --with-drivers=PS \
     --without-tesseract \
-    --with-arch_h="${WASM_H}" \
+    --with-arch_h="${GHOSTSCRIPT_FOLDER}/arch/wasm.h" \
     CC="emcc" \
     CXX="em++" \
     BUILD_CC="$BUILD_CC" \
