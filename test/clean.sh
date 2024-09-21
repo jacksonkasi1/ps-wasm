@@ -7,15 +7,12 @@ set -e
 # Configuration Variables
 # ---------------------------
 
-# Ghostscript version and related paths
-GHOSTSCRIPT_VERSION="10.04.0"
+# Project directories
 PROJECT_ROOT=$(pwd)
+GHOSTSCRIPT_VERSION="10.04.0"
 GHOSTSCRIPT_FOLDER="${PROJECT_ROOT}/ghostscript-${GHOSTSCRIPT_VERSION}"
-GHOSTSCRIPT_TAR="ghostscript-${GHOSTSCRIPT_VERSION}.tar.gz"
-GHOSTSCRIPT_TAR_PATTERN="ghostscript-${GHOSTSCRIPT_VERSION}.tar.gz.*"
-
-# Emscripten SDK directory
 EMSDK_FOLDER="${PROJECT_ROOT}/emsdk"
+OUTPUT_DIR="${PROJECT_ROOT}/bin"
 
 # ---------------------------
 # Function Definitions
@@ -75,9 +72,9 @@ remove_directory "$EMSDK_FOLDER"
 remove_directory "$GHOSTSCRIPT_FOLDER"
 
 # Remove Ghostscript tar.gz file
-remove_file "$GHOSTSCRIPT_TAR"
+remove_file "ghostscript-${GHOSTSCRIPT_VERSION}.tar.gz"
 
 # Remove any additional Ghostscript tar.gz.* files
-remove_files_matching_pattern "$GHOSTSCRIPT_TAR_PATTERN"
+remove_files_matching_pattern "ghostscript-${GHOSTSCRIPT_VERSION}.tar.gz.*"
 
 echo "Clean-up completed successfully."

@@ -17,7 +17,11 @@ PROJECT_ROOT=$(pwd)
 GHOSTSCRIPT_FOLDER="${PROJECT_ROOT}/ghostscript-${GHOSTSCRIPT_VERSION}"
 PATCH_FOLDER="${PROJECT_ROOT}/code_patch"
 OUTPUT_DIR="${PROJECT_ROOT}/bin"
-EMSDK_FOLDER="${PROJECT_ROOT}/emsdk"
+EMSDK_FOLDER="${HOME}/emsdk"  # Corrected path
+
+# Paths to scripts
+INSTALL_SCRIPT="${PROJECT_ROOT}/install.sh"
+PERMIT_SCRIPT="${PROJECT_ROOT}/permit.sh"
 
 # ---------------------------
 # Function Definitions
@@ -35,62 +39,19 @@ install_git() {
 }
 
 # ---------------------------
-# Check and Install Git
+# Run install.sh
 # ---------------------------
 
-echo "Checking if Git is installed..."
-if ! command_exists git; then
-    echo "Git not found. Attempting to install Git..."
-    if command_exists sudo; then
-        sudo apt-get update && sudo apt-get install -y git
-    else
-        install_git
-    fi
-else
-    echo "Git is already installed."
-fi
-
-# ---------------------------
-# Install Emscripten Dependencies
-# ---------------------------
-
-echo "Installing Emscripten dependencies..."
-if ! command_exists emcc; then
-    if [ ! -d "${EMSDK_FOLDER}" ]; then
-        echo "Emscripten not found. Cloning and installing EMSDK..."
-        git clone https://github.com/emscripten-core/emsdk.git
-    else
-        echo "emsdk directory already exists. Skipping clone."
-    fi
-    cd emsdk
-    echo "Installing Emscripten..."
-    ./emsdk install latest
-    echo "Activating Emscripten..."
-    ./emsdk activate latest
-    echo "Sourcing EMSDK environment..."
-    # Use the absolute path to ensure sourcing works correctly
+echo "Starting Emscripten SDK installation..."
+if [ -f "$INSTALL_SCRIPT" ]; then
+    chmod +x "$INSTALL_SCRIPT"
+    "$INSTALL_SCRIPT"
+    # Source the Emscripten environment to update PATH
     source "${EMSDK_FOLDER}/emsdk_env.sh"
-    cd "${PROJECT_ROOT}"
 else
-    echo "Emscripten is already installed."
-    # If emsdk directory exists, source the environment
-    if [ -d "${EMSDK_FOLDER}" ]; then
-        echo "Sourcing existing EMSDK environment..."
-        source "${EMSDK_FOLDER}/emsdk_env.sh"
-    fi
-fi
-
-# Verify that emcc is now available
-if ! command_exists emcc; then
-    echo "Emscripten installation failed or emcc is not in PATH."
+    echo "Error: install.sh not found in $PROJECT_ROOT."
     exit 1
 fi
-
-# Set up environment variables for Emscripten
-export CC=emcc
-export CXX=em++
-export AR=emar
-export RANLIB=emranlib
 
 # ---------------------------
 # Download and Extract Ghostscript
@@ -152,6 +113,9 @@ export OLD_CXX="$CXX"
 export CC="$HOST_CC"
 export CXX="$HOST_CXX"
 
+# Navigate to Ghostscript directory
+cd "${GHOSTSCRIPT_FOLDER}"
+
 # Configure Ghostscript for building auxiliary tools
 echo "Configuring Ghostscript with host compiler for auxiliary tools..."
 ./configure \
@@ -161,32 +125,63 @@ echo "Configuring Ghostscript with host compiler for auxiliary tools..."
     --disable-gtk \
     --with-drivers=PS \
     --without-tesseract \
-    --with-arch_h="${TARGET_WASM_H}"
+    --with-arch_h="${GHOSTSCRIPT_FOLDER}/arch/wasm.h"
 
 echo "Building auxiliary tools..."
-make obj/aux/genarch
+# Specify full paths for all auxiliary tool targets
+make obj/aux/genarch obj/aux/genconf obj/aux/echogs
 
 # Restore CC and CXX to Emscripten compilers
 export CC="$OLD_CC"
 export CXX="$OLD_CXX"
 
-echo "Auxiliary tools compiled successfully."
+# ---------------------------
+# Set CC_FOR_BUILD and CXX_FOR_BUILD
+# ---------------------------
+
+export CC_FOR_BUILD="$HOST_CC"
+export CXX_FOR_BUILD="$HOST_CXX"
+
+# ---------------------------
+# Run permit.sh
+# ---------------------------
+
+echo "Checking and setting permissions for auxiliary tools..."
+if [ -f "$PERMIT_SCRIPT" ]; then
+    chmod +x "$PERMIT_SCRIPT"
+    "$PERMIT_SCRIPT" "${GHOSTSCRIPT_FOLDER}"  # Pass Ghostscript directory as argument
+else
+    echo "Error: permit.sh not found in $PROJECT_ROOT."
+    exit 1
+fi
 
 # ---------------------------
 # Configure Ghostscript for WASM
 # ---------------------------
 
-echo "Configuring Ghostscript for WASM..."
+echo "Configuring Ghostscript for WebAssembly..."
+
+# Set the correct build flags to prevent runtime exit
+GS_LDFLAGS="-s ALLOW_MEMORY_GROWTH=1 -s NO_EXIT_RUNTIME=1"
+
+# Get the build system triplet
+BUILD=$(./config.guess)
+
+# Set host to Emscripten target
+HOST=wasm32-unknown-emscripten
 
 # Re-configure with Emscripten compilers
 emconfigure ./configure \
+    --build="$BUILD" \
+    --host="$HOST" \
     --disable-threading \
     --disable-cups \
     --disable-dbus \
     --disable-gtk \
     --with-drivers=PS \
     --without-tesseract \
-    --with-arch_h="${TARGET_WASM_H}"
+    --with-arch_h="${GHOSTSCRIPT_FOLDER}/arch/wasm.h" \
+    LDFLAGS="${GS_LDFLAGS}"
 
 echo "Configuration for WASM completed successfully."
 
@@ -195,7 +190,7 @@ echo "Configuration for WASM completed successfully."
 # ---------------------------
 
 echo "Compiling Ghostscript to WebAssembly..."
-emmake make XE=".html" GS_LDFLAGS="-s ALLOW_MEMORY_GROWTH=1 -s EXIT_RUNTIME=1"
+emmake make XE=".html" GS_LDFLAGS="-s ALLOW_MEMORY_GROWTH=1 -s NO_EXIT_RUNTIME=1"
 echo "Compilation completed successfully."
 
 # ---------------------------

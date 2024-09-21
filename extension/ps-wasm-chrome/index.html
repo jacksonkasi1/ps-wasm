@@ -2,24 +2,226 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ghostscript WebAssembly</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ghostscript WebAssembly PDF Grayscale Converter</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      background-color: #f0f0f0;
+    }
+    h1 {
+      color: #333;
+    }
+    #container {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      max-width: 600px;
+      margin: auto;
+    }
+    .input-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+    input[type="file"] {
+      width: 100%;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #28a745;
+      border: none;
+      color: #fff;
+      font-size: 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #aaa;
+      cursor: not-allowed;
+    }
+    #output {
+      margin-top: 20px;
+    }
+    #log {
+      background-color: #f9f9f9;
+      padding: 10px;
+      height: 150px;
+      overflow-y: scroll;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    #downloadLink {
+      display: none;
+      margin-top: 20px;
+    }
+    #downloadLink a {
+      color: #007bff;
+      text-decoration: none;
+    }
+    #downloadLink a:hover {
+      text-decoration: underline;
+    }
+  </style>
 </head>
 <body>
-  <h1>Ghostscript WebAssembly</h1>
-  <div id="output"></div>
-
+  <div id="container">
+    <h1>Ghostscript WebAssembly PDF Grayscale Converter</h1>
+    
+    <div class="input-group">
+      <label for="pdfInput">Select a PDF file to convert to grayscale:</label>
+      <input type="file" id="pdfInput" accept="application/pdf">
+    </div>
+    
+    <button id="convertButton" disabled>Convert to Grayscale</button>
+    
+    <div id="output">
+      <h3>Logs:</h3>
+      <div id="log"></div>
+      <div id="downloadLink">
+        <h3>Download Grayscale PDF:</h3>
+        <a id="downloadAnchor" href="#" download="grayscale_output.pdf">Download Grayscale PDF</a>
+      </div>
+    </div>
+  </div>
+  
   <script>
+    // Initialize the Ghostscript module
     var Module = {
       onRuntimeInitialized: function() {
         console.log("Ghostscript WASM initialized");
-        // Insert commands to run Ghostscript on PDFs or PostScript files
+        logMessage("Ghostscript WASM initialized");
       }
     };
 
+    // Load the Ghostscript WASM module
     var script = document.createElement('script');
     script.src = './gs.js'; // Path to the compiled WASM JS file
     document.body.appendChild(script);
+
+    // Get references to HTML elements
+    const pdfInput = document.getElementById('pdfInput');
+    const convertButton = document.getElementById('convertButton');
+    const logDiv = document.getElementById('log');
+    const downloadLinkDiv = document.getElementById('downloadLink');
+    const downloadAnchor = document.getElementById('downloadAnchor');
+
+    let inputFileName = 'input.pdf';
+    let outputFileName = 'grayscale_output.pdf';
+
+    // Enable the convert button when a file is selected
+    pdfInput.addEventListener('change', function(event) {
+      if (pdfInput.files.length > 0) {
+        convertButton.disabled = false;
+        logMessage(`Selected file: ${pdfInput.files[0].name}`);
+      } else {
+        convertButton.disabled = true;
+      }
+    });
+
+    // Handle the conversion process
+    convertButton.addEventListener('click', function() {
+      if (pdfInput.files.length === 0) {
+        alert('Please select a PDF file to convert.');
+        return;
+      }
+
+      // Disable the button to prevent multiple clicks
+      convertButton.disabled = true;
+      logMessage('Starting conversion to grayscale...');
+
+      const file = pdfInput.files[0];
+      inputFileName = 'input.pdf';
+      outputFileName = 'grayscale_output.pdf';
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const arrayBuffer = e.target.result;
+        const uint8Array = new Uint8Array(arrayBuffer);
+        // Write the input PDF to the Emscripten virtual filesystem
+        FS.writeFile(inputFileName, uint8Array);
+        logMessage(`Uploaded ${inputFileName} to virtual filesystem.`);
+
+        // Define Ghostscript command-line arguments
+        const args = [
+          '-sDEVICE=pdfwrite',
+          '-dCompatibilityLevel=1.4',
+          '-dNOPAUSE',
+          '-dBATCH',
+          '-dColorConversionStrategy=Gray',
+          '-dProcessColorModel=/DeviceGray',
+          `-sOutputFile=${outputFileName}`,
+          inputFileName
+        ];
+
+        logMessage(`Running Ghostscript with arguments: ${args.join(' ')}`);
+
+        // Convert arguments to a C-style argv array
+        const argc = args.length + 1; // +1 for program name
+        const argv = Module._malloc((argc) * 4); // assuming 32-bit pointers
+        for (let i = 0; i < args.length; i++) {
+          const ptr = Module.allocate(Module.intArrayFromString(args[i]), 'i8', Module.ALLOC_NORMAL);
+          Module.setValue(argv + i * 4, ptr, 'i32');
+        }
+        // Null terminate the argv array
+        Module.setValue(argv + args.length * 4, 0, 'i32');
+
+        // Invoke Ghostscript's main function
+        const gs_main = Module.cwrap('gs_main', 'number', ['number', 'number']);
+        const result = gs_main(argc, argv);
+
+        // Free allocated memory
+        Module._free(argv);
+
+        if (result === 0) {
+          logMessage('Ghostscript conversion completed successfully.');
+          // Read the output PDF from the virtual filesystem
+          try {
+            const outputData = FS.readFile(outputFileName, { encoding: 'binary' });
+            // Create a Blob from the output data
+            const blob = new Blob([outputData], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            // Set the download link
+            downloadAnchor.href = url;
+            downloadAnchor.download = 'grayscale_output.pdf';
+            downloadLinkDiv.style.display = 'block';
+            logMessage('Grayscale PDF is ready for download.');
+          } catch (e) {
+            logMessage(`Error reading output PDF: ${e}`);
+          }
+        } else {
+          logMessage(`Ghostscript encountered an error. Exit code: ${result}`);
+        }
+
+        // Re-enable the convert button
+        convertButton.disabled = false;
+      };
+
+      reader.onerror = function(e) {
+        logMessage('Error reading the input file.');
+        convertButton.disabled = false;
+      };
+
+      // Read the file as an ArrayBuffer
+      reader.readAsArrayBuffer(file);
+    });
+
+    // Function to log messages to the log div
+    function logMessage(message) {
+      const p = document.createElement('p');
+      p.textContent = message;
+      logDiv.appendChild(p);
+      logDiv.scrollTop = logDiv.scrollHeight;
+      console.log(message);
+    }
   </script>
 </body>
 </html>
